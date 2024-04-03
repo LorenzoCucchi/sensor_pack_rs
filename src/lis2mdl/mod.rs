@@ -1,73 +1,48 @@
-
+use core::fmt::Error;
 use defmt::*;
-use embassy_stm32::time::Hertz;
-use embassy_stm32::{dma::NoDma, i2c, i2c::Instance, interrupt::typelevel::Binding, Peripheral};
+use embassy_stm32::{dma::NoDma, i2c::I2c, peripherals};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::mutex::Mutex;
 mod reg;
 use self::reg::COMP_TEMP_EN;
 pub use reg::Register;
 
-#[derive(Debug, defmt::Format)]
-pub struct DataStatus {
-    pub zyxor: bool,
-    pub xyzor: (bool, bool, bool),
-    pub zyxda: bool,
-    pub xyzda: (bool, bool, bool),
+type Channel1 =
+    Mutex<CriticalSectionRawMutex, Option<I2c<'static, peripherals::I2C1, NoDma, NoDma>>>;
+
+pub struct Lis2mdl {
+    i2c: &'static Channel1,
 }
 
-pub struct Lis2mdl<'a, T: i2c::Instance> {
-    i2c: i2c::I2c<'a, T>,
-}
-
-impl<'a, T: i2c::Instance> Lis2mdl<'a, T> {
+impl Lis2mdl {
     #[must_use]
-    pub fn new(
-        peripheral: impl Peripheral<P = T> + 'a,
-        scl_pin: impl Peripheral<P = impl i2c::SclPin<T>> + 'a,
-        sda_pin: impl Peripheral<P = impl i2c::SdaPin<T>> + 'a,
-        irq: impl Binding<<T as Instance>::ErrorInterrupt, embassy_stm32::i2c::ErrorInterruptHandler<T>>
-            + Binding<<T as Instance>::EventInterrupt, embassy_stm32::i2c::EventInterruptHandler<T>>
-            + 'a,
-    ) -> Self {
-        Self {
-            i2c: i2c::I2c::new(
-                peripheral,
-                scl_pin,
-                sda_pin,
-                irq,
-                NoDma,
-                NoDma,
-                Hertz(100_000),
-                i2c::Config::default(),
-            ),
-        }
+    pub fn new(i2c: &'static Channel1) -> Self {
+        Self { i2c }
     }
 
-    pub fn check_device_id(&mut self) -> bool {
+    pub async fn check_device_id(&self) -> Result<bool, Error> {
         let mut data = [0u8, 1];
-        match self
-            .i2c
-            .blocking_write_read(reg::I2C_SAD, &[Register::WHO_AM_I as u8], &mut data)
-        {
+        
+        let mut i2c_unlocked = self.i2c.lock().await;
+        let i2c_mut = i2c_unlocked.as_mut().ok_or(Error).unwrap();
+
+        match i2c_mut.blocking_write_read(reg::I2C_SAD, &[Register::WHO_AM_I as u8], &mut data) {
             Ok(()) => {
                 info!("Whoami: {}", data[0]);
                 if data[0] == reg::DEVICE_ID {
-                    true
+                    Ok(true)
                 } else {
-                    false
+                    Ok(false)
                 }
-            }
-            Err(i2c::Error::Timeout) => {
-                error!("Operation timed out");
-                false
             }
             Err(e) => {
                 error!("I2C Error: {:?}", e);
-                false
+                Err(Error)
             }
         }
     }
 
-    pub fn apply_config(&mut self) {
+    pub async fn apply_config(&self) -> Result<bool, Error> {
         let mut reg: u8 = 0;
 
         // === CFG_REG_A (60h) ===
@@ -80,10 +55,11 @@ impl<'a, T: i2c::Instance> Lis2mdl<'a, T> {
         info!("CFG_REG_A to write: {}", reg);
 
         let mut data = [0u8, 1];
-        match self
-            .i2c
-            .blocking_write_read(reg::I2C_SAD, &[Register::CFG_REG_A as u8], &mut data)
-        {
+
+        let mut i2c_unlocked = self.i2c.lock().await;
+
+        let i2c_mut = i2c_unlocked.as_mut().ok_or(Error).unwrap(); // Lock the inner I2c instance
+        match i2c_mut.blocking_write_read(reg::I2C_SAD, &[Register::CFG_REG_A as u8], &mut data) {
             Ok(()) => {
                 info!("CFG_REG_A_original: {}", data[0]);
             }
@@ -91,29 +67,29 @@ impl<'a, T: i2c::Instance> Lis2mdl<'a, T> {
                 error!("I2C Error: {:?}", e);
             }
         }
-        self.i2c
+        i2c_mut
             .blocking_write(reg::I2C_SAD, &[Register::CFG_REG_A as u8, reg])
             .unwrap();
-        match self
-            .i2c
-            .blocking_write_read(reg::I2C_SAD, &[Register::CFG_REG_A as u8], &mut data)
-        {
+        match i2c_mut.blocking_write_read(reg::I2C_SAD, &[Register::CFG_REG_A as u8], &mut data) {
             Ok(()) => {
                 info!("CFG_REG_A_written: {}", data[0]);
+                Ok(true)
             }
             Err(e) => {
                 error!("I2C Error: {:?}", e);
+                Err(Error)
             }
         }
     }
 
-    pub fn sample(&mut self) {
+    pub async fn sample(&self) -> Result<bool, Error> {
         let mut buffer = [0u8; 6];
 
-        match self
-            .i2c
-            .blocking_write_read(reg::I2C_SAD, &[Register::OUT_X_L as u8], &mut buffer)
-        {
+        let mut i2c_unlocked = self.i2c.lock().await;
+
+        let i2c_mut = i2c_unlocked.as_mut().ok_or(Error).unwrap(); // Lock the inner I2c instance
+
+        match i2c_mut.blocking_write_read(reg::I2C_SAD, &[Register::OUT_X_L as u8], &mut buffer) {
             Ok(()) => {
                 let out_x = (buffer[1] as i16) << 8 | buffer[0] as i16;
                 let out_y = (buffer[3] as i16) << 8 | buffer[2] as i16;
@@ -134,24 +110,23 @@ impl<'a, T: i2c::Instance> Lis2mdl<'a, T> {
         }
 
         let mut temp = [0u8; 2];
-        match self
-        .i2c
-        .blocking_write_read(reg::I2C_SAD, &[Register::TEMP_OUT_L_REG as u8], &mut temp)
-    {
-        Ok(()) => {
-            let out_x = (temp[1] as i16) << 8 | temp[0] as i16;
+        match i2c_mut.blocking_write_read(
+            reg::I2C_SAD,
+            &[Register::TEMP_OUT_L_REG as u8],
+            &mut temp,
+        ) {
+            Ok(()) => {
+                let out_x = (temp[1] as i16) << 8 | temp[0] as i16;
 
+                let temperature = reg::DEG_PER_LSB * f32::from(out_x) + reg::REF_TEMP;
 
-            let temperature = reg::DEG_PER_LSB * f32::from(out_x) + reg::REF_TEMP;
-
-            info!(
-                "Temperature: {}",
-                temperature
-            );
+                info!("Temperature: {}", temperature);
+                Ok(true)
+            }
+            Err(e) => {
+                error!("I2C Error: {:?}", e);
+                Err(Error)
+            }
         }
-        Err(e) => {
-            error!("I2C Error: {:?}", e);
-        }
-    }
     }
 }
