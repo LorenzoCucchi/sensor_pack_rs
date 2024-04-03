@@ -19,7 +19,7 @@ impl Lps22hh {
         Self { i2c }
     }
 
-    pub async fn check_device_id(&mut self) -> Result<bool, Error> {
+    pub async fn check_device_id(&self) -> Result<bool, Error> {
         let mut data = [0u8, 1];
         let mut i2c_unlocked = self.i2c.lock().await;
 
@@ -41,7 +41,7 @@ impl Lps22hh {
         }
     }
 
-    pub async fn apply_config(&mut self) -> Result<bool, Error> {
+    pub async fn apply_config(&self) -> Result<bool, Error> {
         let mut reg1: u8 = 0;
 
         // === CTRL_REG1 (10h) ===
@@ -108,7 +108,7 @@ impl Lps22hh {
         }
     }
 
-    pub async fn sample(&mut self) -> Result<bool, Error> {
+    pub async fn sample(&self) -> Result<bool, Error> {
         let mut buffer = [0u8; 3];
 
         let mut i2c_unlocked = self.i2c.lock().await;

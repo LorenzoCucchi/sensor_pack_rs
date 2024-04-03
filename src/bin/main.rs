@@ -14,10 +14,9 @@ use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
 use {defmt_rtt as _, panic_probe as _};
 
-mod lps22hh;
-use lps22hh::Lps22hh;
-mod lis2mdl;
-use lis2mdl::Lis2mdl;
+use sensor_pack::lis2mdl::Lis2mdl;
+use sensor_pack::lps22hh::Lps22hh;
+use sensor_pack::lsm6dso::Lsm6dso;
 
 bind_interrupts!(struct Irqs {
     I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
@@ -46,10 +45,12 @@ async fn main(_spawner: Spawner) {
     {
         *(I2C_REF.lock().await) = Some(i2c_ch);
     }
+
     let mut sensor = Lps22hh::new(&I2C_REF);
 
     let mut sensor2 = Lis2mdl::new(&I2C_REF);
-    //let mut sensor = Lps22hh::new(p.I2C1, p.PB8, p.PB9, Irqs);
+
+    //let mut sensor3 = Lsm6dso::new(&I2C_REF);
 
     info!("Blink");
     Timer::after(Duration::from_millis(1000)).await;
@@ -68,6 +69,12 @@ async fn main(_spawner: Spawner) {
     }
     Timer::after(Duration::from_millis(1000)).await;
     sensor2.apply_config().await.unwrap();
+
+    //Timer::after(Duration::from_millis(1000)).await;
+    //if sensor3.check_device_id().await.unwrap() {
+    //    info!("Polling Lsm6dso");
+    //    led.set_high();
+    //}
 
     loop {
         Timer::after(Duration::from_millis(400)).await;

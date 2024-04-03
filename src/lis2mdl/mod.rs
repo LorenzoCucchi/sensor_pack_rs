@@ -20,11 +20,11 @@ impl Lis2mdl {
         Self { i2c }
     }
 
-    pub async fn check_device_id(&mut self) -> Result<bool, Error> {
+    pub async fn check_device_id(&self) -> Result<bool, Error> {
         let mut data = [0u8, 1];
+        
         let mut i2c_unlocked = self.i2c.lock().await;
-
-        let i2c_mut = i2c_unlocked.as_mut().ok_or(Error).unwrap(); // Lock the inner I2c instance
+        let i2c_mut = i2c_unlocked.as_mut().ok_or(Error).unwrap();
 
         match i2c_mut.blocking_write_read(reg::I2C_SAD, &[Register::WHO_AM_I as u8], &mut data) {
             Ok(()) => {
@@ -42,7 +42,7 @@ impl Lis2mdl {
         }
     }
 
-    pub async fn apply_config(&mut self) -> Result<bool, Error> {
+    pub async fn apply_config(&self) -> Result<bool, Error> {
         let mut reg: u8 = 0;
 
         // === CFG_REG_A (60h) ===
@@ -82,7 +82,7 @@ impl Lis2mdl {
         }
     }
 
-    pub async fn sample(&mut self) -> Result<bool, Error> {
+    pub async fn sample(&self) -> Result<bool, Error> {
         let mut buffer = [0u8; 6];
 
         let mut i2c_unlocked = self.i2c.lock().await;

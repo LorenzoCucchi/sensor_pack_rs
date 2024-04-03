@@ -23,7 +23,7 @@ embassy-executor = { version = "0.5.0", features = ["task-arena-size-1024", "arc
 embassy-sync = { version = "0.5.0" }
 embassy-time = { version = "0.3.0", features = ["defmt", "defmt-timestamp-uptime"] }
 
-embassy-stm32 = { version = "0.1.0", features = ["defmt", "stm32f756zg", "unstable-pac", "memory-x", "time-driver-any" ]  }
+embassy-stm32 = { version = "0.1.0", features = ["defmt", "stm32f756zg", "unstable-pac", "memory-x", "time-driver-any","exti" ]  }
 
 bitvec = { version = "1.0", default-features = false, features = ["atomic"] }
 
